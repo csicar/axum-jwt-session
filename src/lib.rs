@@ -1,24 +1,27 @@
-use std::marker::PhantomData;
-
 use async_trait::async_trait;
 use axum::{
-    extract::{FromRequest, FromRef, FromRequestParts},
+    extract::{FromRef, FromRequestParts},
     headers::{authorization::Bearer, Authorization},
-    http::{Request, StatusCode, request::Parts},
-    response::{IntoResponse, Response},
-    Extension, TypedHeader,
+    http::{request::Parts, StatusCode},
+    response::{IntoResponse, Response}, TypedHeader,
 };
-use jsonwebtoken::{decode, Algorithm, DecodingKey, TokenData, Validation, EncodingKey};
+use jsonwebtoken::{decode, DecodingKey, TokenData, Validation, EncodingKey};
 use serde::{Deserialize, Serialize};
-
-pub struct AuthToken<T: Serialize + for<'a> Deserialize<'a>> {
-    pub claim: T,
-}
 
 #[derive(Clone)]
 pub struct TokenConfig {
     pub decode_key: DecodingKey,
     pub encode_key: EncodingKey
+}
+
+pub struct AuthToken<T: Serialize + for<'a> Deserialize<'a>> {
+    pub claim: T,
+}
+
+impl<T: Serialize + for<'a> Deserialize<'a>> AuthToken<T> {
+    pub fn sign(&self, token_config : &TokenConfig) -> Result<String, jsonwebtoken::errors::Error> {
+        jsonwebtoken::encode(&jsonwebtoken::Header::default(), &self.claim, &token_config.encode_key)
+    }
 }
 
 #[derive(Serialize)]
@@ -43,7 +46,7 @@ impl<S: Send+Sync, T: Serialize + for<'a> Deserialize<'a>> FromRequestParts<S>
 
         let token_config = TokenConfig::from_ref(state);
         let token_data: TokenData<T> = decode(bearer.token(), &token_config.decode_key, &Validation::default())
-            .map_err(|err| err.to_string().into_response())?;
+            .map_err(|err| (StatusCode::UNAUTHORIZED, err.to_string()).into_response())?;
 
         Ok(AuthToken {
             claim: token_data.claims,
